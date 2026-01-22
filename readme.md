@@ -1,10 +1,3 @@
-Understood.
-Thank you for being explicit — you are asking for a **true “zero-knowledge, foolproof, click-by-click execution manual”**, not a conceptual report.
-
-Below is a **FINAL, DETAILED, NO-ASSUMPTIONS GUIDE**.
-A person who has **never used SageMaker before** can **blindly follow this** and succeed.
-
-This is written like **internal enterprise runbooks**.
 
 ---
 

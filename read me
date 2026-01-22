@@ -1,0 +1,323 @@
+Yes — **you absolutely can use Google Colab to write the code and push it to GitHub**, and this is a **very reasonable, defensible workflow** if you explain it correctly in interviews.
+
+What matters is **where the code runs in production**, not where it is authored.
+
+Below is a **clean, step-by-step, Colab-first workflow**, with **exact commands, placeholders, and explanations**, and **clear interview positioning** so this does not backfire.
+
+---
+
+# 1. Correct Mental Model (VERY IMPORTANT)
+
+Use this exact distinction:
+
+> **Google Colab = development workstation**
+> **AWS SageMaker = production execution environment**
+
+Colab replaces **your Mac terminal**, *not* SageMaker.
+
+This is acceptable and common.
+
+---
+
+# 2. High-Level Workflow (What You Are Doing)
+
+```
+Google Colab (write code)
+        ↓
+GitHub (version control)
+        ↓
+AWS SageMaker (train + deploy)
+        ↓
+Amazon S3 (model artifacts)
+```
+
+Entities involved:
+
+* Google Colab
+* GitHub
+* AWS SageMaker
+* Amazon S3
+
+---
+
+# 3. PHASE 1 — Prepare Google Colab Environment
+
+## Step 1.1 — Open a New Colab Notebook
+
+Go to:
+[https://colab.research.google.com](https://colab.research.google.com) → **New Notebook**
+
+Rename it:
+
+```
+airbnb_mlops_dev.ipynb
+```
+
+---
+
+## Step 1.2 — Install Required Tools in Colab
+
+Run this **first cell**:
+
+```python
+# Install AWS and Git tools
+!pip install -q sagemaker boto3 awscli gitpython
+```
+
+**Why:**
+Colab does not have AWS or Git preinstalled.
+
+---
+
+# 4. PHASE 2 — Authenticate GitHub from Colab
+
+## Step 2.1 — Generate GitHub Token (One-Time)
+
+On GitHub:
+
+```
+Settings → Developer Settings → Personal Access Tokens
+Scopes:
+✔ repo
+✔ workflow
+```
+
+Copy the token.
+
+---
+
+## Step 2.2 — Clone GitHub Repo in Colab
+
+```python
+# Replace with your repo URL
+!git clone https://<GITHUB_TOKEN>@github.com/<YOUR_GITHUB_USERNAME>/airbnb-linear-regression-mlops.git
+```
+
+🔁 **REPLACE**:
+
+* `<GITHUB_TOKEN>`
+* `<YOUR_GITHUB_USERNAME>`
+
+Colab now has your repo.
+
+---
+
+# 5. PHASE 3 — Create Project Files in Colab
+
+## Step 3.1 — Change Directory
+
+```python
+%cd airbnb-linear-regression-mlops
+```
+
+---
+
+## Step 3.2 — Create Folder Structure
+
+```python
+!mkdir -p src data
+!touch src/train.py src/inference.py requirements.txt deploy.py .gitignore
+```
+
+---
+
+# 6. PHASE 4 — Write Production Code in Colab
+
+You now **write Python files directly from Colab**.
+
+---
+
+## Step 4.1 — Write `src/train.py`
+
+```python
+%%writefile src/train.py
+"""
+train.py
+
+Production training script derived from the original notebook.
+Executed inside AWS SageMaker training jobs.
+"""
+
+import argparse
+import os
+import joblib
+import pandas as pd
+
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+
+
+def main():
+    # SageMaker-provided paths
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data-path", type=str, default="/opt/ml/input/data/train")
+    parser.add_argument("--model-dir", type=str, default="/opt/ml/model")
+    args = parser.parse_args()
+
+    # Load training data
+    df = pd.read_csv(os.path.join(args.data_path, "airbnb.csv"))
+
+    # Feature selection (same as notebook)
+    features = [
+        "accommodates",
+        "bedrooms",
+        "bathrooms",
+        "number_of_reviews"
+    ]
+
+    X = df[features]
+    y = df["price"]
+
+    # Train-test split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    # Train Linear Regression
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+
+    # Evaluation
+    preds = model.predict(X_test)
+    print("RMSE:", mean_squared_error(y_test, preds, squared=False))
+    print("R2:", r2_score(y_test, preds))
+
+    # Save model artifact
+    os.makedirs(args.model_dir, exist_ok=True)
+    joblib.dump(model, os.path.join(args.model_dir, "linear_regression_model.joblib"))
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## Step 4.2 — Write `src/inference.py`
+
+```python
+%%writefile src/inference.py
+"""
+inference.py
+
+Defines SageMaker inference handlers.
+"""
+
+import json
+import joblib
+import numpy as np
+import os
+
+
+def model_fn(model_dir):
+    return joblib.load(os.path.join(model_dir, "linear_regression_model.joblib"))
+
+
+def input_fn(request_body, content_type):
+    if content_type == "application/json":
+        return np.array(json.loads(request_body))
+    raise ValueError("Unsupported content type")
+
+
+def predict_fn(input_data, model):
+    return model.predict(input_data)
+
+
+def output_fn(prediction, content_type):
+    return json.dumps(prediction.tolist())
+```
+
+---
+
+## Step 4.3 — Write `requirements.txt`
+
+```python
+%%writefile requirements.txt
+pandas
+scikit-learn
+joblib
+```
+
+---
+
+# 7. PHASE 5 — Upload Dataset to S3 (FROM COLAB)
+
+## Step 5.1 — Configure AWS Credentials in Colab
+
+```python
+!aws configure
+```
+
+Paste:
+
+* Access Key
+* Secret Key
+* Region (e.g., us-east-1)
+
+---
+
+## Step 5.2 — Upload Dataset
+
+```python
+import sagemaker
+
+session = sagemaker.Session()
+bucket = session.default_bucket()
+
+session.upload_data(
+    path="data/airbnb.csv",
+    bucket=bucket,
+    key_prefix="airbnb/data"
+)
+
+print(f"s3://{bucket}/airbnb/data/airbnb.csv")
+```
+
+---
+
+# 8. PHASE 6 — Commit & Push Code to GitHub
+
+```python
+!git status
+!git add .
+!git commit -m "Add SageMaker training and inference scripts"
+!git push origin main
+```
+
+---
+
+# 9. PHASE 7 — What Runs WHERE (INTERVIEW ANSWER)
+
+| Component       | Runs Where         |
+| --------------- | ------------------ |
+| Notebook        | Google Colab       |
+| Python scripts  | SageMaker          |
+| Model storage   | Amazon S3          |
+| Deployment      | SageMaker Endpoint |
+| Version control | GitHub             |
+
+Say this verbatim if needed.
+
+---
+
+# 10. VERY IMPORTANT INTERVIEW CLARIFICATION
+
+If asked:
+
+**“Are you using Colab in production?”**
+
+Answer:
+
+> “No. Colab is only a development interface. Production workloads run entirely in AWS SageMaker.”
+
+This protects you.
+
+---
+
+# 11. Final One-Line Summary (MEMORIZE)
+
+> “I used Google Colab as a development environment to author code, versioned it in GitHub, and executed training and deployment in SageMaker with model artifacts stored in S3.”
+
+---
+

@@ -14,7 +14,7 @@ def model_fn(model_dir):
     """
     Load the trained model from the model directory.
     """
-    return joblib.load(os.path.join(model_dir, "linear_regression_model.joblib"))
+    return joblib.load(os.path.join(model_dir, "model.joblib"))
 
 
 def input_fn(request_body, content_type):

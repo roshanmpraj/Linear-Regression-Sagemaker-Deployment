@@ -1,17 +1,10 @@
 """
 train.py
 
-This script trains a Linear Regression model using scikit-learn.
-It is executed inside an AWS SageMaker Training Job.
-
-Input:
-- Training data from /opt/ml/input/data/train
-
-Output:
-- Trained model saved to /opt/ml/model
+SageMaker training script for Airbnb price prediction.
+Uses numeric features only and log_price as target.
 """
 
-import argparse
 import os
 import joblib
 import pandas as pd
@@ -22,27 +15,37 @@ from sklearn.metrics import mean_squared_error, r2_score
 
 
 def main():
-    # SageMaker passes these paths automatically
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data-path", type=str, default="/opt/ml/input/data/train")
-    parser.add_argument("--model-dir", type=str, default="/opt/ml/model")
-    args = parser.parse_args()
+    # SageMaker standard paths
+    data_dir = "/opt/ml/input/data/train"
+    model_dir = "/opt/ml/model"
+
+    print("Training data directory contents:", os.listdir(data_dir))
 
     # Load dataset
-    df = pd.read_csv(os.path.join(args.data_path, "airbnb.csv"))
+    df = pd.read_csv(os.path.join(data_dir, "airbnb.csv"), low_memory=False)
 
-    # SAME features as your notebook
-    features = [
+    print("Columns:", df.columns.tolist())
+
+    # Correct numeric features present in the dataset
+    feature_cols = [
         "accommodates",
-        "bedrooms",
         "bathrooms",
-        "number_of_reviews"
+        "bedrooms",
+        "beds",
+        "review_scores_rating"
     ]
 
-    X = df[features]
-    y = df["price"]
+    target_col = "log_price"
 
-    # Split data
+    # Select features and target
+    X = df[feature_cols]
+    y = df[target_col]
+
+    # Handle missing values (IMPORTANT)
+    X = X.fillna(X.median())
+    y = y.fillna(y.median())
+
+    # Train-test split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
@@ -51,17 +54,17 @@ def main():
     model = LinearRegression()
     model.fit(X_train, y_train)
 
-    # Evaluate model
-    predictions = model.predict(X_test)
-    rmse = mean_squared_error(y_test, predictions, squared=False)
-    r2 = r2_score(y_test, predictions)
+    # Evaluate
+    preds = model.predict(X_test)
+    rmse = mean_squared_error(y_test, preds, squared=False)
+    r2 = r2_score(y_test, preds)
 
     print(f"RMSE: {rmse}")
     print(f"R2 Score: {r2}")
 
-    # Save trained model (SageMaker uploads this to S3 automatically)
-    os.makedirs(args.model_dir, exist_ok=True)
-    joblib.dump(model, os.path.join(args.model_dir, "linear_regression_model.joblib"))
+    # Save model
+    os.makedirs(model_dir, exist_ok=True)
+    joblib.dump(model, os.path.join(model_dir, "model.joblib"))
 
 
 if __name__ == "__main__":
